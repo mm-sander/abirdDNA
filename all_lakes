@@ -1,0 +1,31 @@
+# packages ----
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(vegan)
+library(ggfortify)
+library(corrplot)
+library(forcats)
+library(RColorBrewer)
+library(tidyverse)
+library(tidypaleo)
+
+# working path
+setwd("C:/Users/masand001/Documents/shotgun_Birds/Results")
+
+#==== load dfs of single lakes and merge =====
+tmp_btoko=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_btoko.txt", sep = ",", header = TRUE)
+tmp_ilirney=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_ilirney.txt", sep = ",", header = TRUE)
+tmp_lama=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_lama.txt", sep = ",", header = TRUE)
+tmp_lele=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_lele.txt", sep = ",", header = TRUE)
+tmp_naleng=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_naleng.txt", sep = ",", header = TRUE)
+tmp_naleng <- select(tmp_naleng, -Lake)
+tmp_naleng <- tmp_naleng %>% mutate(Lake = "naleng")
+tmp_salmon=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_salmon.txt", sep = ",", header = TRUE)
+tmp_ulu=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_ulu.txt", sep = ",", header = TRUE)
+tmp_ximen=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_ximen.txt", sep = ",", header = TRUE)
+
+# merge
+tmp <- bind_rows(tmp_btoko, tmp_ilirney, tmp_lama, tmp_lele, tmp_naleng, tmp_salmon, tmp_ulu, tmp_ximen)
+
