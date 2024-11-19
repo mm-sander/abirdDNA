@@ -1,7 +1,11 @@
+############################################
+##### shotgun bird dataset ALL LAKES #######
+
 # packages ----
 library(readr)
 library(dplyr)
 library(ggplot2)
+library(ggrepel)
 library(tidyr)
 library(vegan)
 library(ggfortify)
@@ -29,3 +33,891 @@ tmp_ximen=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_xim
 # merge
 tmp <- bind_rows(tmp_btoko, tmp_ilirney, tmp_lama, tmp_lele, tmp_naleng, tmp_salmon, tmp_ulu, tmp_ximen)
 
+#==== reorder and filter dataframe ====
+tmp <- tmp[order(tmp$ka, decreasing = TRUE), ]
+unique(tmp$ka)
+tmp <- filter(tmp, ka > 0 & ka < 22)
+tmp$ka <- round(tmp$ka, digits = 0)
+write.table(tmp, file = 'tmp_all.txt', dec = ".", sep = ",", row.names = FALSE)
+
+#######################  1.  ##########################
+########## df without preselection ############# ----
+
+tmp <- read_csv("tmp_all.txt") 
+genera_all <- unique(tmp$genus)
+families_all <- unique(tmp$family)
+orders_all <- unique(tmp$order)
+# save lists of taxa
+# write.table(genera_all, file = "complete_genus_list.csv", sep = ",", row.names = FALSE)
+# write.table(families_all, file = "complete_family_list.csv", sep = ",", row.names = FALSE)
+# write.table(orders_all, file = "complete_order_list.csv", sep = ",", row.names = FALSE)
+
+#### FIGURE 3 ## df for groups ----
+
+df_songb <- filter(tmp, order == "Passeriformes") %>%
+  mutate(group = "Songbirds")
+df_raptors <- filter(tmp, order == "Falconiformes" | order == "Accipitriformes" | order == "Strigiformes") %>%
+  mutate(group = "Raptors_Owls")
+df_water <- filter(tmp, order == "Anseriformes" | 
+                     order == "Gaviiformes" | order == "Pelecaniformes" | 
+                     order == "Suliformes") %>%
+  mutate(group = "Waterfowl")
+df_galli <- filter(tmp, order == "Galliformes") %>%
+  mutate(group = "Chicken_birds")
+
+df_group <- rbind(df_songb, df_raptors, df_water, df_galli)
+
+## reads per years, cummulate to ka:
+years_reads <- df_group %>% 
+  group_by(ka, group) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% ungroup() %>%
+  group_by(ka) %>%
+  mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup()
+
+years_reads <- subset(years_reads, !is.na(years_reads$group))
+years_reads <- as.data.frame(years_reads)
+lake = "all"
+n_taxa = length((unique(df_group$order)))
+reads = sum(years_reads$taxonReads)
+
+### stratplot vertical
+stratplot_v <- ggplot(years_reads, aes(y=percentage, x=ka, col = "grey80")) +
+  # exaggeration; comment out if not necessary
+  geom_line_exaggerate(exaggerate_x = 1, color = "grey70", lty = 2) +
+  # draw filled polygon
+  geom_area(fill = "grey80", color = "grey80") +  
+  # add a line on top of each polygon
+  geom_line(aes(y=percentage, x=ka), color="black", size=0.5) +
+  # facet by taxon, stacking plots vertically and changing titles
+  facet_wrap(~group, scales = "free", ncol = 1, 
+             labeller = as_labeller(c(
+               "Chicken_birds" = "Chicken birds",
+               "Raptors_Owls" = "Raptors and Owls",
+               "Songbirds" = "Songbirds",
+               "Waterfowl" = "Waterbirds"
+             ))) + 
+  labs(y="Relative abundance (%)", x="1000 years BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "kyr BP", breaks = rev(seq(0, plyr::round_any(range(years_reads$ka)[2], 1, f = ceiling), by = 2))) + 
+  # add 14 ka line
+  geom_vline(xintercept = 17, linetype = 3)+
+  geom_vline(xintercept = 10, linetype = 3)+
+  # customize the appearance
+  theme_bw() + 
+  theme(strip.text.x = element_text(size = 10, hjust = 0, vjust = 0.5, angle = 0), 
+        strip.background = element_blank(), 
+        axis.text.x = element_text(size = 6, angle = 0),
+        axis.text.y = element_text(size = 8), 
+        axis.title = element_text(size = 12),
+        panel.spacing.x = unit(2, "mm"),
+        panel.border = element_rect(fill = NA, colour = "black"), 
+        axis.ticks.length = unit(1, "mm"),
+        legend.position = "none")  # remove legend
+stratplot_v
+# save as jpg 800x800
+
+
+######################### 2. ###############################
+########### new rank assignment for AVES ################ ----
+
+# load data from lineage 
+tmp=read.csv("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_all.txt", sep = ",")
+sum(tmp$taxonReads)
+
+### birds in arctic regions
+# load list of selected birds
+taxalist=read.csv("C:/Users/masand001/Documents/shotgun_Birds/Taxa_selection_birds.csv", sep = ";")
+
+# 1. list of possible families
+families=unique(taxalist$Family)
+# families not present in selection table  
+out_fa=tmp[!tmp$family %in% families, ]
+sort(unique(out_fa$family))  
+sum(out_fa$taxonReads)
+# families present in table
+in_fa=tmp[tmp$family %in% families, ]
+sum(in_fa$taxonReads)
+
+# 2. df of families to be included on level family
+fams <- filter(taxalist, new_rank == "family")
+sp_fams=unique(fams$Species)
+gs_fams=unique(fams$Genus)
+fa_fams=unique(fams$Family)
+
+# in subsetted data table (from 1.)
+# genus (with and without species info) that should go to family level
+in_fa_ge=in_fa[in_fa$genus %in% gs_fams, ]
+out_fa_ge=in_fa[!in_fa$genus %in% gs_fams, ]
+in_fa_ge$new_rank="family"
+
+# 3. df of genuses to be included on level genus
+gs <- filter(taxalist, new_rank == "species" | new_rank == "genus")
+gs_gs=unique(gs$Genus)
+sp_gs=unique(gs$Species)
+
+in_ge_ge=in_fa[in_fa$genus %in% gs_gs, ] # genus (with and without species info)
+sort(unique(in_ge_ge$species))
+out_ge_ge=in_fa[!in_fa$genus %in% gs_gs, ]
+sort(unique(out_ge_ge$genus)) 
+
+in_ge_ge$new_rank="genus"
+
+sum(in_ge_ge$taxonReads)
+
+### merge
+intp=rbind(in_fa_ge, in_ge_ge)
+sum(intp$taxonReads)
+
+species <- unique(intp$species)
+genus <- unique(intp$genus)
+family <- unique(intp$family)
+
+# combine information from taxalist with dataset
+intp <- left_join(intp, taxalist, by = c("taxon" = "Taxon"))
+# load metadata for selected genera
+taxalist2=read.csv("C:/Users/masand001/Documents/shotgun_Birds/Taxa_selection_birds_genus.csv", sep = ";")
+intp2 <- left_join(intp, taxalist2, by = c("genus" = "Genus"))
+sum(intp2$taxonReads)
+
+### new dataframe to work with
+tmp=intp2
+## save data
+# write.table(tmp, file = 'tmp_selection_all.txt', dec = ".", sep = ",", row.names = FALSE)
+
+
+### load df ----
+tmp <- read_csv("tmp_selection_all.txt") 
+tmp <- tmp[order(tmp$ka, decreasing = FALSE), ]
+tmp <- filter(tmp, genus != "NA")
+unique(tmp$ka)
+sum(tmp$taxonReads)
+taxalist2=read.csv("C:/Users/masand001/Documents/shotgun_Birds/Taxa_selection_birds_genus.csv", sep = ";")
+
+
+# df for taxon reads per year and taxon ----
+
+years_reads <- tmp %>% 
+  group_by(genus, Lake, ka) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% ungroup() #%>%
+
+years_reads <-  years_reads %>% 
+  group_by(ka) %>%
+  mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup()
+years_reads <- as.data.frame(years_reads)
+unique(years_reads$genus)
+sum(years_reads$taxonReads)
+
+df <- left_join(years_reads, taxalist2, by = c("genus"="Genus"))
+sum(df$taxonReads)
+unique(df$ka)
+
+## save data
+#write.table(df, file = 'years_reads_all_21ka.txt', dec = ".", sep = ",", row.names = FALSE)
+
+#####################################################
+### FIGURE 4 B ## taxon reads per year and habitat ----
+
+# load df
+df <- read_csv("years_reads_all_21ka.txt")
+## exclude domestic taxa chicken and turkey
+tmp <- filter(df, genus != "Gallus" & genus != "Meleagris" & habitat_short != "NA")
+unique(tmp$ka)
+unique(tmp$Lake)
+unique(tmp$habitat_short)
+unique(tmp$genus)
+
+sum(tmp$taxonReads)
+genus <- as.data.frame(unique(tmp$genus))
+
+# plot for each lake seperately with tmp2
+# lake = "lele"
+# tmp2 <- filter(tmp, Lake == lake & habitat_short != "NA")
+# unique(tmp2$Lake)
+
+years_habitat_reads <- tmp %>% 
+  group_by(habitat_short, ka) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% ungroup() %>%
+  group_by(ka) %>%
+  mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup()
+years_habitat_reads <- as.data.frame(years_habitat_reads)
+
+### plot group percentages over time
+ggplot(years_habitat_reads, aes(fill=habitat_short, y=percentage, x=ka))+
+  geom_rect(aes(xmin=10, xmax=17, ymin=0, ymax=Inf), fill = "lightgrey", alpha = 0.5)+
+  geom_smooth(aes(color = habitat_short), method = "loess") + # glm for lake ULU
+  theme(panel.background = element_blank())+
+  ggtitle(paste(nrow(genus), "genera, ", "reads:",sum(tmp$taxonReads)))+
+  labs(y="Relative abundance (%)", x="kyr BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "kyr BP", breaks = rev(seq(0, plyr::round_any(range(years_habitat_reads$ka)[2], 1, f = ceiling), by = 2)))
+# save as jpg 
+
+##################  FIGURE 4C-D  #############
+### single taxons as representatives ###### ----
+
+# load df
+df <- read_csv("years_reads_all_21ka.txt")
+sum(df$taxonReads)
+df <- filter(df, genus != "Gallus" & genus != "Meleagris")
+sum(df$taxonReads)
+lake = ""
+### for each lake seperately
+# lake = "ulu"
+# tmp <- df
+# tmp <- filter(df, Lake == lake) 
+
+years_reads <- tmp %>% 
+  group_by(genus, ka) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% ungroup() %>%
+  group_by(ka) %>%
+  mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup()
+
+### lagopus and oenanthe as open grassland representatives ----
+years_reads_tundra <- filter(years_reads, genus == "Lagopus" | genus == "Oenanthe")
+years_reads_tundra <- as.data.frame(years_reads_tundra)
+lagopus <- filter(years_reads_tundra, genus == "Lagopus")
+oenanthe <- filter(years_reads_tundra, genus == "Oenanthe")
+sum(lagopus$taxonReads)
+sum(oenanthe$taxonReads)
+sum(years_reads_tundra$taxonReads)
+tmp <- years_reads_tundra
+indicator = paste(lake, "-", "birds of open grasslands, reads: Lagopus =", sum(lagopus$taxonReads), "Oenanthe =", sum(oenanthe$taxonReads))
+
+### waterfowl vs. shorebirds ----
+years_reads_water <- filter(years_reads, genus == "Anas" | genus == "Anser" | genus == "Aythya" | 
+                              genus == "Cygnus" & genus != "NA")
+years_reads_water <- years_reads_water %>% mutate(group = "Waterfowl")
+years_reads_water <- as.data.frame(years_reads_water)
+sum(years_reads_water$taxonReads)
+
+years_reads_shore <- filter(years_reads, genus == "Calidris"|genus == "Charadrius")
+years_reads_shore <- years_reads_shore %>% mutate(group = "Shorebirds")
+years_reads_shore <- as.data.frame(years_reads_shore)
+sum(years_reads_shore$taxonReads)
+
+water_shore <- rbind(years_reads_water, years_reads_shore)
+tmp <- water_shore
+indicator = paste(lake, "-", "reads shorebirds =", sum(years_reads_shore$taxonReads), "waterfowl =", sum(years_reads_water$taxonReads))
+
+# for salmon 
+ggplot(tmp, aes(fill=group, y=percentage, x=ka))+ # water and shorebirds: genus --> group
+  geom_smooth(method = "loess", data = filter(tmp, group == "Waterfowl")) +
+  geom_point(aes(y=percentage, x=ka, color=group), data = filter(tmp, group == "Shorebirds"), pch = 2, size = 4)+ 
+  geom_line(aes(y=percentage, x=ka, color=group), data = filter(tmp, group == "Shorebirds"), pch = 2)+
+  geom_vline(xintercept = 14, linetype = 3)+
+  geom_vline(xintercept = 10, linetype = 3)+
+  theme(panel.background = element_blank())+
+  ggtitle(indicator)+
+  labs(y="Relative abundance (%)", x="1000 years BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "1000 years BP", breaks = rev(seq(0, plyr::round_any(range(tmp$ka)[2], 1, f = ceiling), by = 2)))
+# save as jpg 800x500
+
+# for ulu 
+ggplot(tmp, aes(fill=group, y=percentage, x=ka))+ # water and shorebirds: genus --> group
+  geom_point(aes(y=percentage, x=ka, color=group), pch = 2, size = 4)+ 
+  geom_line(aes(y=percentage, x=ka, color=group), pch = 2)+
+  geom_vline(xintercept = 14, linetype = 3)+
+  geom_vline(xintercept = 10, linetype = 3)+
+  theme(panel.background = element_blank())+
+  ggtitle(indicator)+
+  labs(y="Relative abundance (%)", x="1000 years BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "1000 years BP", breaks = rev(seq(0, plyr::round_any(range(tmp$ka)[2], 1, f = ceiling), by = 2)))
+# save as jpg 800x500
+
+### raptors and owls ----
+years_reads_pred <- filter(years_reads, genus == "Tyto" | genus == "Accipiter" | genus == "Falco"| 
+                             genus == "Aquila"| genus == "Haliaeetus")
+years_reads_pred<- as.data.frame(years_reads_pred)
+sum(filter(years_reads, genus == "Tyto")$taxonReads) # 408
+sum(filter(years_reads, genus == "Accipiter")$taxonReads) # 151
+sum(filter(years_reads, genus == "Falco")$taxonReads) # 812
+sum(filter(years_reads, genus == "Aquila")$taxonReads) # 155
+sum(filter(years_reads, genus == "Haliaeetus")$taxonReads) # 88
+sum(years_reads_pred$taxonReads) # 1614
+
+tmp <- years_reads_pred
+indicator = paste(lake, "- carnivorous birds, reads: Accipiter =", sum(filter(years_reads, genus == "Accipiter")$taxonReads),
+                  "Aquila =", sum(filter(years_reads, genus == "Aquila")$taxonReads), 
+                  "Falco = ", sum(filter(years_reads, genus == "Falco")$taxonReads),
+                  "Haliaethus = ", sum(filter(years_reads, genus == "Haliaeetus")$taxonReads),
+                  "Tyto =", sum(filter(years_reads, genus == "Tyto")$taxonReads))
+
+## plot "relative abundances over time" for all ----
+
+# (for waterfowl and shorebirds use fill = and color = : group instead of genus)
+ggplot(tmp, aes(fill=group, y=percentage, x=ka))+ # water and shorebirds: genus --> group
+  geom_rect(aes(xmin=10, xmax=17, ymin=0, ymax=Inf), fill = "lightgrey", alpha = 0.5)+
+  #  geom_point(aes(color = genus), pch = 2, size = 4)+ # plot grassland birds: for Ulu no model function
+  #  geom_line(aes(color = genus), pch = 2)+
+  geom_smooth(aes(color = group), method = "loess") + # plot grassland birds: for ximen method = "glm"
+#  geom_vline(xintercept = 14, linetype = 3)+
+#  geom_vline(xintercept = 10, linetype = 3)+
+  theme(panel.background = element_blank())+
+  ggtitle(indicator)+
+  labs(y="Relative abundance (%)", x="kyr BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "kyr BP", breaks = rev(seq(0, plyr::round_any(range(tmp$ka)[2], 1, f = ceiling), by = 2)))
+# save as jpg 800x500
+
+################ FIGURE 3 plants & 4A ##############################
+######### df Streptophyta #################
+
+#==== load dfs of single lakes and merge
+tmp_selection_plants_btoko=read.table("C:/Users/masand001/Documents/shotgun_Birds/btoko/tmp_selection_plants_btoko.txt", sep = ",", header = TRUE)
+tmp_selection_plants_btoko <- tmp_selection_plants_btoko %>% mutate(Lake = "btoko")
+tmp_selection_plants_ilirney=read.table("C:/Users/masand001/Documents/shotgun_Birds/ilirney/tmp_selection_plants_ilirney.txt", sep = ",", header = TRUE)
+tmp_selection_plants_ilirney <- tmp_selection_plants_ilirney %>% mutate(Lake = "ilirney")
+tmp_selection_plants_lama=read.table("C:/Users/masand001/Documents/shotgun_Birds/lama/tmp_selection_plants_lama.txt", sep = ",", header = TRUE)
+tmp_selection_plants_lama <- tmp_selection_plants_lama %>% mutate(Lake = "lama")
+tmp_selection_plants_lele=read.table("C:/Users/masand001/Documents/shotgun_Birds/lele/tmp_selection_plants_lele.txt", sep = ",", header = TRUE)
+tmp_selection_plants_lele <- tmp_selection_plants_lele %>% mutate(Lake = "lele")
+tmp_selection_plants_naleng=read.table("C:/Users/masand001/Documents/shotgun_Birds/naleng/tmp_selection_plants_naleng.txt", sep = ",", header = TRUE)
+tmp_selection_plants_naleng <- tmp_selection_plants_naleng %>% mutate(Lake = "naleng")
+tmp_selection_plants_salmon=read.table("C:/Users/masand001/Documents/shotgun_Birds/salmon/tmp_selection_plants_salmon.txt", sep = ",", header = TRUE)
+tmp_selection_plants_salmon <- tmp_selection_plants_salmon %>% mutate(Lake = "salmon")
+tmp_selection_plants_ulu=read.table("C:/Users/masand001/Documents/shotgun_Birds/ulu/tmp_selection_plants_ulu.txt", sep = ",", header = TRUE)
+tmp_selection_plants_ulu <- tmp_selection_plants_ulu %>% mutate(Lake = "ulu")
+tmp_selection_plants_ximen=read.table("C:/Users/masand001/Documents/shotgun_Birds/ximen/tmp_selection_plants_ximen.txt", sep = ",", header = TRUE)
+tmp_selection_plants_ximen <- tmp_selection_plants_ximen %>% mutate(Lake = "ximen")
+
+# merge
+tmp_plants <- bind_rows(tmp_selection_plants_btoko, tmp_selection_plants_ilirney, tmp_selection_plants_lama, tmp_selection_plants_lele, tmp_selection_plants_naleng, tmp_selection_plants_salmon, tmp_selection_plants_ulu, tmp_selection_plants_ximen)
+tmp_plants <- select(tmp_plants, taxonReads, species, genus, family,order, years, ka, form, form2, Lake)
+
+# reorder dataframe: oldest sample to youngest one ====
+tmp_plants <- tmp_plants[order(tmp_plants$years, decreasing = TRUE), ]
+unique(tmp_plants$ka)
+tmp_plants$ka <- round(tmp_plants$ka, digits = 0)
+tmp_plants <- filter(tmp_plants, ka > -1 & ka < 23)
+
+unique(tmp_plants$Lake)
+
+# write.table(tmp_plants, file = 'tmp_plants_all.txt', dec = ".", sep = ",", row.names = FALSE)
+
+# df per year and form ----
+# load df
+tmp_plants=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_plants_all.txt", sep = ",", header = TRUE)
+
+### for each lake seperately
+# lake = "ulu"
+# tmp_plants <- filter(tmp_plants, Lake == lake) 
+
+years_reads <- filter(tmp_plants, form2 != "NA") %>% 
+  group_by(form2) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T))%>% 
+  mutate(percentage = round(taxonReads / sum(taxonReads) * 100), digits = 2) 
+years_reads <- filter(tmp_plants, form2 != "NA") %>% 
+  group_by(form2, ka) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>%
+  group_by(ka) %>%
+  mutate(percentage = round(taxonReads / sum(taxonReads) * 100), digits = 2) %>% ungroup()  
+years_reads <- as.data.frame(years_reads)
+sum(years_reads$taxonReads)
+unique(tmp_plants$family)
+
+# form data table for pca ----
+df_years <- sort(unique(years_reads$ka))
+#df_years <- df_years[which(df_years > 0)]
+df_form2 <- sort(unique(years_reads$form2))
+df_new_plants <- matrix(0, nrow=length(df_years), ncol=length(df_form2))
+df_new_plants <- as.data.frame(df_new_plants)
+
+colnames(df_new_plants) <- df_form2
+rownames(df_new_plants) <- df_years
+
+for (taxname in df_form2) {
+  # nimm taxreads und years der spezies i
+  
+  taxyears <- years_reads$ka[years_reads$form2 == taxname] #i
+  
+  # iteriere über jaher der spezies, setze werte der taxreads in der matrix
+  for (taxyear in taxyears) {
+    taxread <- years_reads$percentage[(years_reads$form2 == taxname) & (years_reads$ka == taxyear)] #i
+    df_new_plants[which(df_years == taxyear), which(df_form2 == taxname)] = sum(taxread)
+  }
+  
+} 
+
+## plot rel. abundance over time ----
+
+unique(years_reads$form2)
+years_reads <- filter(years_reads, form2 != "cushion_shrub" & form2!= "cushion-shrub")
+sum(years_reads$taxonReads)
+families <- as.data.frame(unique(tmp_plants$family))
+
+lake = ""
+indicator = paste("plant growth forms,", nrow(families) ,"plant families, reads:", sum(years_reads$taxonReads))
+
+# all taxa on form level
+
+plantplot <- ggplot(filter(years_reads, form2 != "aquatic" & form2 != "tree" & form2 != "cushion_shrub" & form2!= "cushion-shrub"), 
+                    aes(fill=form2, y=percentage, x=ka, color=form2))+
+  geom_rect(aes(xmin=10, xmax=17, ymin=0, ymax=Inf), fill = "lightgrey", alpha = 0.5, inherit.aes = FALSE)+
+  geom_smooth(method = "loess") +
+#  geom_vline(xintercept = 17, linetype = 3)+
+#  geom_vline(xintercept = 10, linetype = 3)+
+  geom_point(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "aquatic")) +
+  geom_line(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "aquatic"), linetype = 3) +
+  geom_point(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "tree")) +
+  geom_line(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "tree"), linetype = 3) +
+  theme(panel.background = element_blank())+
+  ggtitle(indicator)+
+  labs(y="Relative abundance (%)", x="kyr BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "kyr BP", breaks = rev(seq(0, plyr::round_any(range(years_reads$ka)[2], 1, f = ceiling), by = 2)))
+plantplot
+# save as jpg 800x500
+
+## stacked plot
+
+# Calculate the cumulative sum of the percentage for each group at each time point
+years_reads <- years_reads %>%
+  arrange(ka, form2) %>%
+  group_by(ka) %>%
+  mutate(cumulative_percentage = cumsum(percentage))
+stackedplot_v <- ggplot(years_reads, aes(x = ka)) +
+  # Draw filled polygons, stacking the areas
+  geom_area(aes(y = percentage, fill = form2), 
+            position = "stack", color = "black") +
+  # Add lines corresponding to the cumulative areas
+  #  geom_line(aes(y = cumulative_percentage, group = form2), color = "black", linewidth = 0.5) +
+  labs(y = "", x = "") +
+  ggtitle("Plant growth forms") +
+  # Reverse the x axis for age and set the limits
+  scale_x_reverse(name = "", limits = c(22, 0), breaks = rev(seq(0, 22, by = 2))) + 
+  # Set the y-axis limits
+  scale_y_continuous(limits = c(0, 100)) +
+  # add 14 ka line
+  geom_vline(xintercept = 17, linetype = 3)+
+  geom_vline(xintercept = 10, linetype = 3)+
+  # Customize the appearance
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 10, hjust = 0, vjust = 0.5, angle = 0),
+        strip.background = element_blank(),
+        axis.text.x = element_text(size = 6, angle = 0),
+        axis.text.y = element_text(size = 8),
+        axis.title = element_text(size = 12),
+        panel.spacing.x = unit(2, "mm"),
+        panel.border = element_rect(fill = NA, colour = "black"),
+        axis.ticks.length = unit(1, "mm"),
+        legend.position = "none")  # remove legend
+stackedplot_v + scale_fill_grey()
+
+#### PCA/dbRDA on genus level ----
+
+## taxa selection and df matrix
+
+# load dfs for plants and birds
+
+# plants
+tmp_plants=read.table("C:/Users/masand001/Documents/shotgun_Birds/Results/tmp_plants_all.txt", sep = ",", header = TRUE)
+# matrix Lake, ka and form2
+plant_reads <- filter(tmp_plants, form2 != "NA") %>% 
+  group_by(Lake, ka, form2) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% ungroup() %>%
+  group_by(Lake, ka) %>%
+  mutate(percentage = taxonReads / sum(taxonReads) * 100)
+plant_reads <- as.data.frame(plant_reads)
+plant_matrix <- select(plant_reads, -taxonReads)
+plant_matrix <- spread(plant_matrix, form2, percentage)
+plant_matrix <- plant_matrix %>% replace(is.na(.), 0)
+
+#birds
+df <- read_csv('years_reads_all_21ka.txt')
+df <- filter(df, genus != "Gallus" & genus != "Meleagris")
+years_reads <- filter(df, genus != "NA") %>% 
+  group_by(Lake, ka, genus) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>%
+  group_by(Lake, ka) %>%
+  mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup()
+unique(years_reads$genus)
+# save list as csv
+pca_genus_list <- unique(years_reads$genus) 
+# write.table(pca_genus_list, file = "pca_genus_list.csv", sep = ",", row.names = FALSE)
+#
+years_reads <- as.data.frame(years_reads)
+years_reads$percentage <- round(years_reads$percentage, digits = 2)
+# make list of genera that occur in at least 3 ka, each lake single - because of different genera
+years_reads$binom <- 0
+years_reads$binom <- years_reads$binom %>% ifelse(taxonReads > 0, 1)
+gs_naleng <- filter(years_reads, Lake == "naleng") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_naleng <- filter(gs_naleng, binom > 2)
+gs_ximen <- years_reads %>% filter(Lake == "ximen") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_ximen <- filter(gs_ximen, binom > 2)
+gs_salmon <- years_reads %>% filter(Lake == "salmon") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_salmon <- filter(gs_salmon, binom > 2)
+gs_ulu <- years_reads %>% filter(Lake == "ulu") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_ulu <- filter(gs_ulu, binom > 2)
+gs_btoko <- years_reads %>% filter(Lake == "btoko") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_btoko <- filter(gs_btoko, binom > 2)
+gs_lele <- years_reads %>% filter(Lake == "lele") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_lele <- filter(gs_lele, binom > 2)
+gs_lama <- years_reads %>% filter(Lake == "lama") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_lama <- filter(gs_lama, binom > 2)
+gs_ilirney <- years_reads %>% filter(Lake == "ilirney") %>% group_by(genus) %>%
+  summarise(binom=sum(binom, na.rm=T)) %>% ungroup()
+gs_ilirney <- filter(gs_ilirney, binom > 2)
+gs <- rbind(gs_btoko, gs_ilirney, gs_lama, gs_lele, gs_naleng, gs_salmon, gs_ulu, gs_ximen)
+gs <- unique(gs$genus)
+
+# select df with this list
+in_years_reads=years_reads[years_reads$genus %in% gs, ]
+unique(in_years_reads$genus)
+# select for more abundant taxa
+gs <- in_years_reads %>%
+  group_by(genus) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% ungroup()
+gs <- filter(gs, taxonReads > 100)
+gs <- unique(gs$genus)
+# select df with this new list
+in_years_reads=years_reads[years_reads$genus %in% gs, ]
+# save the list of genera used in PCA
+pca_genus_list_short <- unique(in_years_reads$genus) 
+# write.table(pca_genus_list_short, file = "pca_genus_list_short.csv", sep = ",", row.names = FALSE)
+
+pca_genus_reads <- in_years_reads
+pca_genus_reads <- pca_genus_reads %>%
+  group_by(genus) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>% 
+  mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup()
+pca_genus_reads$percentage <- round(pca_genus_reads$percentage, digits = 2)
+# write.table(pca_genus_reads, file = "pca_genus_reads.csv", sep = ";", dec = ",", row.names = FALSE)
+
+#
+group_matrix <- select(in_years_reads, -percentage, -binom)
+# load lake location
+lon_lat <- read_csv('Lakes_location_v2.csv')
+group_matrix <- left_join(group_matrix, lon_lat, by = "Lake") # add lat/lon table
+group_matrix <- spread(group_matrix, genus, taxonReads)
+group_matrix <- as.data.frame(group_matrix)
+group_meta <- select(group_matrix, Lake, ka, lon, lat)
+
+# create response matrix and explanatory matrix
+
+df_complete <- left_join(group_matrix, plant_matrix, by = c("Lake", "ka"))
+df_complete <- df_complete %>% replace(is.na(.), 0)
+
+# write.table(df_complete, file = "df_complete_selection_rda_pca.txt", dec=".", sep = ",")
+
+### PCA
+
+### load data frames
+df_complete <- read.csv("df_complete_selection_rda_pca.txt")
+df_response <- select(df_complete, -forbs_and_grasses, -tree, -woody, -cushion_shrub, -aquatic, -Lake, -ka, -lon, -lat) # , -aquatic_plants
+
+# transformation
+df_response <- decostand(df_response, method= "hellinger")
+
+pca1 <- prcomp(df_response, scale. = FALSE)
+summary(pca1)
+pca_scores <- data.frame(pca1$x)
+pca_loadings <- as.data.frame(pca1$rotation)  # PCA loadings for species
+# find outliers
+hist(pca_scores$PC2)
+which(pca_scores$PC2 > 0.8) # --> row 20 is the outlier: 4kyrBP Ilirney
+pca_scores <- filter(pca_scores, PC2 < 0.9)
+# remove outlier
+df_complete <- df_complete[-20,]
+# Add the grouping factor to the PCA scores ## time slice
+pca_scores$ka <- df_complete$ka
+# Add the grouping factor to the PCA scores ## latitude
+pca_scores$lat <- df_complete$lat
+pca_scores$grass <- df_complete$forbs_and_grasses
+pca_scores$wood <- df_complete$woody
+pca_scores$tree <- df_complete$tree
+pca_scores$aqua <- df_complete$aquatic
+pca_scores$lake <- df_complete$Lake
+
+# Plot biplot using ggplot2 with arrows for taxa
+
+### years BP
+ggplot() +
+  # Plot the PCA scores (samples)
+#  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = ka, pch = lake), size = 4) +
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = ka, shape = lake), size = 4) +
+  scale_shape_manual(values = c(16, 17, 18, 19, 15, 3, 7, 8)) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1, linetype = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+  
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+
+### latitude
+ggplot() +
+  # Plot the PCA scores (samples)
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = lat), size = 4) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+ 
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+
+### grasses
+ggplot() +
+  # Plot the PCA scores (samples)
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = grass), size = 4) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+  
+  #  geom_text(data = pca_loadings,
+  #            aes(x = PC1, y = PC2, label = rownames(pca_loadings)),
+  #            color = "black", hjust = 0.5, vjust = 0.5) +
+  
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+
+### wood
+ggplot() +
+  # Plot the PCA scores (samples)
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = wood), size = 4) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+  
+  #  geom_text(data = pca_loadings,
+  #            aes(x = PC1, y = PC2, label = rownames(pca_loadings)),
+  #            color = "black", hjust = 0.5, vjust = 0.5) +
+  
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+### tree
+ggplot() +
+  # Plot the PCA scores (samples)
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = tree), size = 4) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+  
+  #  geom_text(data = pca_loadings,
+  #            aes(x = PC1, y = PC2, label = rownames(pca_loadings)),
+  #            color = "black", hjust = 0.5, vjust = 0.5) +
+  
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+### aquatic plants
+ggplot() +
+  # Plot the PCA scores (samples)
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = aqua), size = 4) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+  
+  #  geom_text(data = pca_loadings,
+  #            aes(x = PC1, y = PC2, label = rownames(pca_loadings)),
+  #            color = "black", hjust = 0.5, vjust = 0.5) +
+  
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+
+### site
+ggplot() +
+  # Plot the PCA scores (samples)
+  geom_point(pca_scores, mapping = aes(x = PC1, y = PC2, color = lake), size = 4) +
+  
+  # Add arrows for species loadings (with uniform length scaling)
+  geom_segment(data = pca_loadings,
+               aes(x = 0, y = 0, xend = (PC1), yend = (PC2)), 
+               arrow = arrow(length = unit(0.3, "cm")), 
+               color = "orange", alpha = 0.5, linewidth = 1) +
+  
+  # Add species names to the arrows
+  geom_text_repel(data=pca_loadings, 
+                  aes(x = PC1, y = PC2, label = rownames(pca_loadings)), 
+                  box.padding = 0.2, max.overlaps = Inf, color = "darkgrey")+
+  
+  #  geom_text(data = pca_loadings,
+  #            aes(x = PC1, y = PC2, label = rownames(pca_loadings)),
+  #            color = "black", hjust = 0.5, vjust = 0.5) +
+  
+  # Labels and theme adjustments
+  ggtitle('') +
+  xlab(paste0('PC1 (', round(summary(pca1)$importance[2,1] * 100, 2), '% variance)')) +
+  ylab(paste0('PC2 (', round(summary(pca1)$importance[2,2] * 100, 2), '% variance)')) +
+  theme_minimal() #+
+
+
+#### dbRDA
+
+# df matrix (bird group) left, row per lake and years, 
+# explanatory variables (aquatic plants, terrestrial plant growth forms) right
+
+### load data frames
+df_complete <- read.csv("df_complete_selection_rda_pca.txt")
+df_response <- select(df_complete, -forbs_and_grasses, -tree, -woody, -cushion_shrub, -aquatic, -Lake, -ka, -lon, -lat) # , -aquatic_plants
+
+# transformation
+df_response <- decostand(df_response, method= "hellinger")
+df_expl <- select(df_complete, 
+                  forbs_and_grasses, tree, woody, cushion_shrub, aquatic, Lake, 
+                  ka, lat, lon) 
+df_expl$ka <- as.numeric(df_expl$ka)
+df_expl$lat <- as.numeric(df_expl$lat)
+df_expl_scaled <- scale(df_expl[1:5], center = T, scale = T)
+ka <- as.data.frame(scale(df_expl$ka, center = T, scale = T))
+lat <- as.data.frame(scale(df_expl$lat, center = T, scale = T))
+Lake <- df_expl$Lake
+df_expl_scaled_compl <- cbind(df_expl_scaled, ka,lat,Lake)
+names(df_expl_scaled_compl)[6] <- paste("ka")
+names(df_expl_scaled_compl)[7] <- paste("lat")
+
+
+cor(df_expl_scaled_compl[1:7]) # woody and grass are too  much correlated, decide for grass
+
+ord1 <- dbrda(df_response ~ forbs_and_grasses + tree + aquatic  + ka + lat + Lake,
+              df_expl_scaled_compl,
+              distance = "euclidean") # proportion 0.17 constrained
+ord2 <- dbrda(df_response ~ forbs_and_grasses + tree + aquatic  + ka + lat,
+              df_expl_scaled_compl,
+              distance = "euclidean") # proportion 0.07 constrained
+ord3 <- dbrda(df_response ~ forbs_and_grasses + tree + aquatic  + ka + Lake,
+              df_expl_scaled_compl,
+              distance = "euclidean") # proportion 0.17 constrained
+
+ord4 <- dbrda(df_response ~ ka,
+              df_expl_scaled_compl,
+              distance = "euclidean") # 0.02
+ord5 <- dbrda(df_response ~ Lake,
+              df_expl_scaled_compl,
+              distance = "euclidean") # 0.11
+
+
+# for each model...
+summary(ord5)
+
+anova(ord3, permutations = how(nperm=999),
+      by = NULL, model = c("reduced", "direct", "full"), 
+      parallel = getOption("mc.cores"), strata = NULL,
+      cutoff = 1, scope = NULL)
+anova(ord3, by="margin", permu=999) # test for sign. environ. variables
+
+library(ggordiplots)
+ordiplot <- gg_ordiplot(ord3, groups = df_expl$Lake, pt.size = 3, kind = "sd")
+ordiplot <- ordiplot$plot +
+  labs(x = "dbRDA1 (27%)", y = "dbRDA2 (14%)")+
+  theme(panel.background = element_rect(fill='transparent'))
+ordiplot
+
+db_rda <- ord3
+
+# Extract dbRDA scores for plotting
+db_rda_sites <- as.data.frame(scores(db_rda, display = "sites"))  # Scores for sites (samples)
+db_rda_species <- as.data.frame(scores(db_rda, display = "species"))  # Scores for species
+db_rda_env <- as.data.frame(scores(db_rda, display = "bp"))  # Scores for environmental variables (arrows)
+
+# Scaling factor for arrows (tweak as needed for visibility)
+arrow_scaling_factor <- 2
+
+# Rescale species and environmental scores
+db_rda_species_scaled <- db_rda_species * arrow_scaling_factor
+db_rda_env_scaled <- db_rda_env * arrow_scaling_factor
+
+# Add grouping factor (e.g., location) to site scores if needed
+db_rda_sites$location <- df_expl$Lake
+db_rda_sites$kyr <- df_expl$ka
+
+### Plot dbRDA using ggplot2
+
+ggplot() +
+  # Plot the site scores (samples)
+  #  geom_point(data = db_rda_sites, aes(x = dbRDA1, y = dbRDA2, color = location), size = 4) +
+  geom_point(data = db_rda_sites, aes(x = dbRDA1, y = dbRDA2), size = 3, alpha = 0.5) + # , color = location
+  
+  # Add arrows for environmental variables (explanatory variables)
+  geom_segment(data = db_rda_env_scaled,
+               aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2),
+               arrow = arrow(length = unit(0.3, "cm")),
+               color = "black") +
+  
+  # Label environmental variables at the end of the arrows
+  geom_text(data = db_rda_env_scaled,
+            aes(x = dbRDA1 * 1.2, y = dbRDA2 * 1.2, label = rownames(db_rda_env_scaled)),
+            color = "black", hjust = 0.5, vjust = 0.5) +
+  
+  # Add titles and axis labels
+  ggtitle("dbRDA Biplot") +
+  xlab("dbRDA1") + ylab("dbRDA2") +
+  theme_minimal()
