@@ -1,0 +1,448 @@
+# lele shotgun terrestrial plant families dataset
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidypaleo)
+
+# lake?
+LAKE="lele"
+# working path?
+setwd("C:/Users/masand001/Documents/shotgun_Birds/lele")
+
+
+#==== functions ====
+# split tax list
+chunk_tax <- function(x,n) split(x, cut(seq_along(x), n, labels = FALSE)) 
+# tables
+dat_reads_percent_ranks <- function(dat = NULL, ranks = NULL, max.percent = 0, freqs = 1) {
+  if (ranks %in% c("species", "genus", "family", "order", "class", "phylum", "kingdom", "superkingdom")) {
+    
+    # counts
+    sub.dat=dat[!is.na(dat[, ranks]), c("taxonReads", ranks, "ka")]
+    names(sub.dat)[2] = "taxa"
+    
+    # total count per taxon per sample and control at rank
+    sub.dat.agg0=aggregate(.~ ka + taxa, sub.dat, FUN = sum)
+    
+    # total count per sample and control at ranks
+    sub.dat.agg1=aggregate(.~ ka, sub.dat[-2], FUN = sum)
+    
+    # percent and frequency per sample
+    sub.dat.agg2=NULL
+    sub.dat.agg2=sub.dat.agg0 %>% filter(ka >= 0) %>%
+      group_by(ka) %>%
+      mutate(percentage = taxonReads / sum(taxonReads) * 100) %>% ungroup() %>%
+      group_by(taxa) %>%
+      mutate(max_percentage = ifelse(ka >= 0, max(percentage), 0)) %>% ungroup() %>%
+      left_join(
+        sub.dat.agg0 %>%
+          group_by(taxa) %>%
+          summarize(taxon_frequency = n()) %>%
+          ungroup(),
+        by = "taxa") %>% filter(max_percentage >= max.percent, taxon_frequency >= freqs) %>% as.data.frame()
+    
+    #
+    sub.dat.agg3=sub.dat.agg0[sub.dat.agg0$taxa %in% sub.dat.agg2$taxa, ]
+    
+    # list
+    dat.return=list(sub.dat.agg0, sub.dat.agg1, sub.dat.agg2, sub.dat.agg3)
+    names(dat.return)=c(paste0(ranks, ".count"), paste0("agg.", ranks, ".count.libs"), paste0(ranks, ".percent.freq"), paste0(ranks, ".filter.count"))
+    
+    # return
+    return(dat.return)
+    
+  } else {
+    print("this function only works for 8 main ranks")
+  }
+}
+
+plot_reads_percent_ranks <- function(dat.source = NULL, dat.list=NULL, ranks = NULL, max.percent = 0, freqs = 1, figs_path = NULL, figs_org = NULL, figs_locs = NULL) {
+  #-- fig. 1, reads over time at rank
+  df_orgs=dat.list[[1]]
+  names(df_orgs)=c("ka", "variable", "value")
+  #
+  # max. taxa within each bin
+  if (ceiling(length(unique(df_orgs$variable)) / 40) == 1) {
+    tax_bin=list(sort(unique(df_orgs$variable)))
+  } else {
+    tax_bin=chunk_tax(sort(unique(df_orgs$variable)), ceiling(length(unique(df_orgs$variable)) / 40))
+  }
+  
+  max.x=ceiling(max(df_orgs$ka)/2) * 2
+  # list taxa bin
+  plot.bin=list()
+  for (ti in 1:length(tax_bin)) {
+    sub_c_t=df_orgs[df_orgs$variable %in% tax_bin[[ti]], ]
+    # plot ~ ka
+    r_value=ggplot(subset(sub_c_t, ka > 0), aes(x = value, y = ka)) +
+      scale_y_reverse(breaks=seq(max.x, 0, -2)) +
+      geom_col_segsh() + 
+      #geom_lineh() +
+      facet_geochem_gridh(vars(variable), scales = "free_x") +
+      ggtitle(paste0(figs_locs, " | ", figs_org, " | ", ranks, " | Raw counts | Source Data: ", dat.source)) +
+      labs(x = "Raw counts", y = "Age / cal yr BP") +
+      theme(strip.background = element_blank(),
+            strip.clip = "no",
+            strip.text = element_text(angle = 90, hjust = 0))
+    # list taxa bins
+    plot.bin[[ti]]=r_value
+  }
+  
+  # create a PDF file
+  pdf(file = paste0(figs_path, figs_locs, "_", figs_org, "_", ranks, "_rawReads_Times.pdf"), width = 30.5, height = 8)  # Adjust width and height as needed
+  for (j in seq_along(plot.bin)) {
+    # j is taxa bin
+    print(paste0("plot: ",j))
+    print(plot.bin[[j]])
+  }
+  # Close the PDF device
+  dev.off()
+  
+  #-- fig.2, total org reads across samples and controls
+  df_orgs=dat.list[[2]]
+  df_orgs$ka=paste0(sprintf("%02d", seq(nrow(df_orgs), 1, -1)), "_", df_orgs$ka)
+  
+  s_value=ggplot(df_orgs, aes(x = ka, y = taxonReads)) +
+    scale_y_continuous(labels = scales::comma) +
+    geom_bar(stat = "identity") +
+    ggtitle(paste0(figs_locs, " | ", figs_org, " | ", ranks, " | Raw counts | Source Data: ", dat.source)) +
+    labs(x = "Samples and controls", y = "Raw counts") +
+    theme(title = element_text(size = 12),
+          axis.title = element_text(size = 12),
+          text = element_text(size = 12),
+          axis.text.x.bottom = element_text(size = 12, angle = 90, hjust = 1, vjust = .5),
+          axis.text.y.left = element_text(size = 12))
+  # create a PDF file
+  pdf(file = paste0(figs_path, figs_locs, "_", figs_org, "_", ranks, "_Total_rawReads_libs.pdf"), width = 20.5, height = 8)  # Adjust width and height as needed
+  print(s_value)
+  # Close the PDF device
+  dev.off()
+  
+  #-- fig. 3, percent over time
+  df_orgs=dat.list[[3]][c("ka", "taxa", "percentage")]
+  names(df_orgs)=c("ka", "variable", "value")
+  
+  # max. taxa within each bin
+  if (ceiling(length(unique(df_orgs$variable)) / 40) == 1) {
+    tax_bin=list(sort(unique(df_orgs$variable)))
+  } else {
+    tax_bin=chunk_tax(sort(unique(df_orgs$variable)), ceiling(length(unique(df_orgs$variable)) / 40))
+  }
+  
+  max.x=ceiling(max(df_orgs$ka)/2) * 2
+  #min.x=min(df_orgs$age > 0)
+  
+  # list taxa bin
+  plot.bin=list()
+  for (ti in 1:length(tax_bin)) {
+    sub_c_t=df_orgs[df_orgs$variable %in% tax_bin[[ti]], ]
+    # plot ~ ka
+    p_value=ggplot(subset(sub_c_t, ka > 0), aes(x = value, y = ka)) +
+      scale_y_reverse(breaks=seq(max.x, 0, -2)) +
+      geom_col_segsh() + 
+      #   geom_lineh() +
+      facet_geochem_gridh(vars(variable), scales = "free_x") +
+      ggtitle(paste0(figs_locs, " | ", figs_org, " | ", ranks, " | Percentage | Source Data: ", dat.source, " | Max. percent >= ", max.percent, " | Occ >= ",  freqs, " samples")) +
+      labs(x = "%", y = "Age / cal yr BP") +
+      theme(strip.background = element_blank(),
+            strip.clip = "no",
+            strip.text = element_text(angle = 90, hjust = 0))
+    # list taxa bins
+    plot.bin[[ti]]=p_value
+  }
+  
+  # create a PDF file
+  pdf(file = paste0(figs_path, figs_locs, "_", figs_org, "_", ranks, "_percentage_max.per_", max.percent, "_min.occ_", freqs, ".pdf"), width = 30.5, height = 8)  # Adjust width and height as needed
+  for (j in seq_along(plot.bin)) {
+    # j is taxa bin
+    print(paste0("plot: ",j))
+    print(plot.bin[[j]])
+  }
+  # Close the PDF device
+  dev.off()
+  
+  #-- fig. 4, reads over time at rank for filtered taxa
+  df_orgs=dat.list[[4]]
+  names(df_orgs)=c("ka", "variable", "value")
+  # max. taxa within each bin
+  if (ceiling(length(unique(df_orgs$variable)) / 40) == 1) {
+    tax_bin=list(sort(unique(df_orgs$variable)))
+  } else {
+    tax_bin=chunk_tax(sort(unique(df_orgs$variable)), ceiling(length(unique(df_orgs$variable)) / 40))
+  }
+  #
+  max.x=ceiling(max(df_orgs$ka)/2) * 2
+  # list taxa bin
+  plot.bin=list()
+  for (ti in 1:length(tax_bin)) {
+    sub_c_t=df_orgs[df_orgs$variable %in% tax_bin[[ti]], ]
+    # plot ~ ka
+    r_value=ggplot(subset(sub_c_t, ka > 0), aes(x = value, y = ka)) +
+      scale_y_reverse(breaks=seq(max.x, 0, -2)) +
+      geom_col_segsh() + 
+      geom_lineh() +
+      facet_geochem_gridh(vars(variable), scales = "free_x") +
+      ggtitle(paste0(figs_locs, " | ", figs_org, " | ", ranks, " | Raw counts | Source Data: ", dat.source, " | Max. percent >= ", max.percent, " | Occ >= ",  freqs, " samples")) +
+      labs(x = "Raw counts", y = "Age / cal yr BP") +
+      theme(strip.background = element_blank(),
+            strip.clip = "no",
+            strip.text = element_text(angle = 90, hjust = 0))
+    # list taxa bins
+    plot.bin[[ti]]=r_value
+  }
+  
+  # create a PDF file
+  pdf(file = paste0(figs_path, figs_locs, "_", figs_org, "_", ranks, "_taxaReads_max.per_", max.percent, "_min.occ_", freqs, ".pdf"), width = 30.5, height = 8)  # Adjust width and height as needed
+  for (j in seq_along(plot.bin)) {
+    # j is taxa bin
+    print(paste0("plot: ",j))
+    print(plot.bin[[j]])
+  }
+  # Close the PDF device
+  dev.off()
+}
+
+#==== working ====
+
+
+# Source Data?
+SOURCE_DATA="metadmg-lca" # 
+
+
+# where to store the output?
+# dir.create("C:/Users/masand001/Documents/shotgun_Birds/lele/Figures")
+# dir.create("C:/Users/masand001/Documents/shotgun_Birds/lele/Tables")
+
+# define path to output
+LCA_PATH=paste0("C:/Users/masand001/Documents/shotgun_Birds")
+TABLE_PATH=paste0("C:/Users/masand001/Documents/shotgun_Birds/lele/Tables/")
+FIG_PATH=paste0("C:/Users/masand001/Documents/shotgun_Birds/lele/Figures/")
+
+#==== load lca =====s
+load("C:/Users/masand001/Documents/shotgun_Birds/lele/lele_lca_MergedData.RData")
+lcasdf=MergedData
+
+#==== add infor. to LAKE ====
+tempdf=lcasdf
+unique(tempdf$ka)
+
+#==== check diff. between sample information from sample list and sequencing data ====
+wot_sa=tempdf[is.na(tempdf$ka), ]
+
+#==== remove sequencing data without sample information ====
+tempdf=tempdf[!is.na(tempdf$ka), ]
+
+#==== reorder dataframe: oldest sample to youngest one ====
+lcalineage=tempdf[order(tempdf$ka, decreasing = TRUE), ]
+unique(lcalineage$ka)
+
+#==== targets ====
+# orgs
+unique(lcalineage$kingdom) # viridiplantae
+unique(lcalineage$phylum) # streptophyta (Armleuchteralgen und Pflanzen) --> embryophyta (Landpflanzen)
+unique(sort(lcalineage$class, decreasing = FALSE)) # no embryophyta
+ORGS=c("Streptophyta")
+
+####
+# ranks
+CT_RANKS=c("family")
+
+# make a list
+COMBINED_TAX=as.list(ORGS)
+names(COMBINED_TAX)=c(ORGS)
+
+
+
+#==== processing ====
+df=lcalineage
+
+for (i in c(1)) { #1:length(COMBINED_TAX)
+  print(i)
+  ORGS_NAME=names(COMBINED_TAX[i])
+  LIST_ORGS=COMBINED_TAX[[i]]
+  
+  # keep rows for LIST_ORGS
+  tmp=df[grepl(paste0(paste0("\\b", LIST_ORGS, "\\b"), collapse = "|"), df$path), ]}
+
+# how many taxon reads in bird dataset?
+sum(tmp$taxonReads)
+
+############ plot reads, produce table #####################
+
+# plot?
+if (dim(tmp)[1] > 0) { 
+  for (ri in CT_RANKS) {
+    tmp.list=dat_reads_percent_ranks(dat = tmp, ranks = ri, max.percent = 0, freqs = 2)
+    # plotting 
+    plot_reads_percent_ranks(dat.source = SOURCE_DATA, dat.list = tmp.list, ranks = ri, max.percent = 0, freqs = 2, figs_path = FIG_PATH, figs_org = ORGS_NAME, figs_locs = LAKE)
+  }
+} else {
+  print(paste0("no candidates for ", i))
+}
+
+
+## settings
+# save orgs' table?
+save_orgs_table=TRUE 
+# save plot table
+save_plot_table=FALSE
+# save plot?
+save_plot=FALSE 
+# filtering?
+min.occ=2 # found in 2 samples at least
+max.rel=0.5 # max. relative abundance >= 0.5
+#
+for (i in c(1)) { #1:length(COMBINED_TAX)
+  print(i)
+  ORGS_NAME=names(COMBINED_TAX[i])
+  LIST_ORGS=COMBINED_TAX[[i]]
+  
+  # keep rows for LIST_ORGS
+  tmp=df[grepl(paste0(paste0("\\b", LIST_ORGS, "\\b"), collapse = "|"), df$path), ]
+  if (save_orgs_table) {
+    # save raw df for orgs
+    write.csv(tmp, paste0(TABLE_PATH, LAKE, "_", ORGS_NAME, ".csv"))
+  }
+  
+  # table and plots
+  if (dim(tmp)[1] > 0) { 
+    for (ri in CT_RANKS) {
+      # data frame
+      tmp.list=dat_reads_percent_ranks(dat = tmp, ranks = ri, 
+                                       max.percent = 0, freqs = min.occ)
+      if (save_plot_table) {
+        #
+        write.csv(tmp.list[[1]], paste0(TABLE_PATH, LAKE, "_", ORGS_NAME, "_", ri, "_Counts.csv"))
+        write.csv(tmp.list[[2]], paste0(TABLE_PATH, LAKE, "_", ORGS_NAME, "_", ri, "_aggCounts.csv"))
+        write.csv(tmp.list[[3]], paste0(TABLE_PATH, LAKE, "_", ORGS_NAME, "_", ri, "_max.rel", max.rel, "_min.occ", min.occ, "_percent_freq.csv"))
+        write.csv(tmp.list[[4]], paste0(TABLE_PATH, LAKE, "_", ORGS_NAME, "_", ri, "_max.rel", max.rel, "_min.occ", min.occ, "_Counts.csv"))
+      }
+      # plot
+      if (save_plot) {
+        plot_reads_percent_ranks(dat.source = SOURCE_DATA, dat.list = tmp.list, ranks = ri, 
+                                 max.percent = 0, freqs = min.occ, 
+                                 figs_path = FIG_PATH, figs_org = ORGS_NAME, figs_locs = LAKE)
+      }
+    }
+  } else {
+    print(paste0("no candidates for ", i))
+  }
+}
+
+
+########### terr plant selection ################ ----
+
+# load data from lineage 
+tmp=read.csv("C:/Users/masand001/Documents/shotgun_Birds/lele/Tables/lele_Streptophyta.csv", sep = ",")
+sum(tmp$taxonReads)
+
+### terrestrial plants family level only
+# load list of selected birds
+taxalist=read.csv("C:/Users/masand001/Documents/shotgun_Birds/Taxa_selection_terrplants.csv", sep = ";")
+
+# list of possible families
+families=unique(taxalist$family)
+# families not present in selection table  
+out_fa=tmp[!tmp$family %in% families, ]
+sort(unique(out_fa$family))  # cross-check with deselected families in LELE - new family?
+sum(out_fa$taxonReads)
+# families present in table
+in_fa=tmp[tmp$family %in% families, ]
+sum(in_fa$taxonReads)
+
+intp=in_fa
+sum(intp$taxonReads)
+
+# combine information from taxalist with dataset
+intp <- left_join(intp, taxalist, by = c("family" = "family"))
+sum(intp$taxonReads)
+
+### new dataframe to work with
+tmp=intp
+## save data
+write.table(tmp, file = 'tmp_selection_plants_lele.txt', dec = ".", sep = ",", row.names = FALSE)
+
+
+### load df ----
+tmp_plants <- read_csv("tmp_selection_plants_lele.txt") 
+
+tmp_plants$ka <- round(tmp_plants$ka, digits = 0)
+
+### packages ########## ----
+
+library(forcats)
+library(RColorBrewer)
+library(vegan)
+
+#### df for taxon reads per year and taxon ----
+# reorder dataframe: oldest sample to youngest one ====
+tmp_plants <- tmp_plants[order(tmp_plants$years, decreasing = TRUE), ]
+unique(tmp_plants$ka)
+tmp_plants$ka <- round(tmp_plants$ka, digits = 0)
+tmp_plants <- filter(tmp_plants, ka > -1 & ka < 23)
+
+years_reads <- filter(tmp_plants, form2 != "NA") %>% 
+  group_by(form2) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T))%>% 
+  mutate(percentage = round(taxonReads / sum(taxonReads) * 100), digits = 2) 
+years_reads <- filter(tmp_plants, form2 != "NA") %>% 
+  group_by(form2, ka) %>%
+  summarise(taxonReads=sum(taxonReads, na.rm=T)) %>%
+  group_by(ka) %>%
+  mutate(percentage = round(taxonReads / sum(taxonReads) * 100), digits = 2) %>% ungroup()  
+years_reads <- as.data.frame(years_reads)
+sum(years_reads$taxonReads)
+unique(tmp_plants$family)
+
+# plots ----
+
+lake = "lele"
+
+unique(years_reads$form2)
+years_reads <- filter(years_reads, form2 != "cushion_shrub" & form2!= "cushion-shrub")
+sum(years_reads$taxonReads)
+
+indicator = "Levinson-Lessing, 88 plant (Streptophyta) families, reads: 25.464.642"
+
+# all taxa on form level
+
+plantplot <- ggplot(filter(years_reads, form2 != "aquatic" & form2 != "tree" & form2 != "cushion_shrub" & form2!= "cushion-shrub"), 
+                    aes(fill=form2, y=percentage, x=ka, color=form2))+
+  geom_smooth(method = "loess") +
+  geom_vline(xintercept = 14, linetype = 3)+
+  geom_vline(xintercept = 10, linetype = 3)+
+  geom_point(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "aquatic")) +
+  geom_line(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "aquatic"), linetype = 3) +
+  geom_point(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "tree")) +
+  geom_line(aes(y=(percentage*10), x=ka, color=form2), data = filter(years_reads, form2 == "tree"), linetype = 3) +
+  theme(panel.background = element_blank())+
+  ggtitle(indicator)+
+  labs(y="Relative abundance (%)", x="1000 years BP") +
+  # reverse the x axis for age
+  scale_x_reverse(name = "1000 years BP", breaks = rev(seq(0, plyr::round_any(range(years_reads$ka)[2], 1, f = ceiling), by = 2)))
+plantplot
+# save as jpg 800x500
+
+
+# all taxa on form level
+ggplot(df, aes(fill=form2, y=percentage, x=ka)) + 
+  geom_bar(position="stack", stat="identity", width=0.5)
+
+ggplot(df, aes(fill=form2, y=percentage, x=ka, color=form2))+
+  geom_smooth(method = "loess") +
+  geom_vline(xintercept = 14, linetype = 3)+
+  theme(panel.background = element_blank())+
+  ggtitle(lake, indicator)+
+  scale_x_continuous(limits=c(0, 21), breaks = seq(0,21,5))
+#  scale_color_manual(values = line_palette)
+# save as jpg 800x500
+
+ggplot(df, aes(fill=form2, y=taxonReads, x=ka, color=form2))+
+  geom_smooth(method = "loess") +
+  geom_vline(xintercept = 14, linetype = 3)+
+  theme(panel.background = element_blank())+
+  ggtitle(lake, indicator)+
+  scale_x_continuous(limits=c(0, 21), breaks = seq(0,21,5))
+#  scale_color_manual(values = line_palette)
+# save as jpg 800x500
