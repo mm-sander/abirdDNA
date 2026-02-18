@@ -1,5 +1,4 @@
-# abirdDNA
-analysis of sedimentary ancient DNA focussing on birds in the Arctic.
-..input data derives from HOLI pipeline edited by Sisi Liu, available here: https://github.com/sisiliu-research/EnviHoli
-..script for initial compilation of data for "Aves", included in input data, is an edited script by Sisi Liu, and is available under the github file "30_metaDMG-lca_profiles_LAKENAME_birds"
-..first publication of shotgun data: Liu et al. 2025 preprint (https://www.biorxiv.org/content/10.1101/2025.06.23.661215v2)
+This repository contains the code and data required to reproduce all analyses and figures presented in the manuscript: Sander, M. M., Lisovski, S., Liu, S., Stoof-Leichsenring, K., and Herzschuh, U. (2025). Sedimentary Metagenomics Reveal Avian Community Transitions From the Last Glacial Maximum to the Holocene. 10.22541/au.173501107.74212796/v1. Accepted.. The repository includes all scripts used for statistical analyses and figure generation, as well as the processed datasets (for Aves) necessary to run these workflows.
+Data availability
+All data required to reproduce the analyses and plots in XXX.R are provided in this repository. The datasets can be reproduced from the raw data and the code by Liu et al. ((https://www.biorxiv.org/content/10.1101/2025.06.23.661215v2); preprint) published on https://github.com/sisiliu-research/EnviHoli).
+
